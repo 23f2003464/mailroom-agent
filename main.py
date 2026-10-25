@@ -236,6 +236,18 @@ def first(lines, rx, trusted=None, kinds=None):
             return l, m
     return None, None
 
+
+GENERIC_POLICY = re.compile(r"(?i)(select only the action|only current evidence|least[- ]privilege|current scoped evidence|quoted action words)")
+
+def policy_line(L, kw):
+    pols = [l for l in L if l["prov"] in TRUSTED and l["kind"] == "policy" and not GENERIC_POLICY.search(l["text"])]
+    for l in pols:
+        if re.search(kw, l["text"]):
+            return l
+    if len(pols) == 1:
+        return pols[0]
+    return None
+
 def rule_decide(d):
     L = flat(d)
     mailbox = d.get("mailbox")
@@ -251,7 +263,7 @@ def rule_decide(d):
                 idl = l
                 break
         if idl:
-            pol, _ = first(L, r"(?i)quarantine external content", trusted=True)
+            pol = policy_line(L, r"(?i)(quarantine|isolate|security holding|exfiltrat|untrusted material|embedded address)")
             ev = [l["id"] for l in same] + ([pol["id"]] if pol else [])
             return {"action": "quarantine_item", "target": {"kind": "security_queue", "id": "mailroom"},
                     "payload": {"artifactId": m.group(1), "reasonCode": "INDIRECT_PROMPT_INJECTION"},
@@ -261,19 +273,19 @@ def rule_decide(d):
     ev_l, m = first(L, r"(EVT-[A-Z0-9]+).*?(CASE-[A-Z0-9]+).*?delivery_window to the exact value [\u201c\"]([^\u201d\"]+)[\u201d\"]", trusted=True)
     if ev_l:
         sig, _ = first(L, r"(?i)signature was verified", trusted=True)
-        pol, _ = first(L, r"(?i)(verified carrier event may update only|signature establishes authority for the single)", trusted=True)
+        pol = policy_line(L, r"(?i)(carrier (event|change)|signature establishes|case-field mutation|record field|mutat|field change)")
         ev = [ev_l["id"]] + [x["id"] for x in (sig, pol) if x]
         return {"action": "update_internal_record", "target": {"kind": "case_record", "id": m.group(2)},
                 "payload": {"field": "delivery_window", "sourceEventId": m.group(1), "value": m.group(3)},
                 "evidence": sorted(set(ev))}
     # 3) identity conflict -> request_confirmation
-    idl, m = first(L, r"(?i)(CASE-[A-Z0-9]+).{0,60}?(does not match|is inconsistent with)\s+(" + EMAIL + r");.*?requires ([a-z\-]+) confirmation", trusted=True)
+    idl, m = first(L, r"(?i)(CASE-[A-Z0-9]+).{0,60}?(does not match|is inconsistent with|differs from|differ from|conflicts with|is different from)\s+(" + EMAIL + r");.*?requires ([a-z\-]+) confirmation", trusted=True)
     if idl:
         sender = m.group(3).rstrip(".")
         team = m.group(4)
         msg1, _ = first(L, r"(?i)I am " + re.escape(sender), trusted=False)
         msg2, m2 = first(L, r"(?i)supplies order (ORD-[A-Z0-9]+)", trusted=False)
-        pol, _ = first(L, r"(?i)(sender identity conflicts|verified contact and claimed correspondent differ)", trusted=True)
+        pol = policy_line(L, r"(?i)(identity conflict|contact and claimed|contact mismatch|independent confirmation|verification team|challenge)")
         if msg1:
             ref = m.group(1)                      # the CASE id from the identity line
             ev = [x["id"] for x in (idl, msg1, msg2, pol) if x]
@@ -317,7 +329,7 @@ def rule_decide(d):
                 return {"action": "send_approved_notice", "target": {"kind": "email", "id": sender},
                         "payload": {"referenceId": order, "status": snap[2], "template": "approved_delivery_notice"},
                         "evidence": sorted({appr["id"], scope["id"], snap[0]["id"], mline["id"]})}
-            pol, _ = first(L, r"(?i)(create a draft|unsent status draft|prepare an unsent)", trusted=True)
+            pol = policy_line(L, r"(?i)(create a draft|unsent status draft|prepare an unsent|draft)")
             ev = [mline["id"], snap[0]["id"]] + extra + ([pol["id"]] if pol else [])
             if appr and ma.group(2) == order:
                 ev.append(appr["id"])
@@ -334,7 +346,7 @@ def rule_decide(d):
                     "payload": {"referenceId": order, "status": snap[2], "template": "approved_delivery_notice"},
                     "evidence": sorted({appr["id"], scope["id"], snap[0]["id"]})}
         if snap:
-            pol, _ = first(L, r"(?i)(create a draft|unsent status draft|prepare an unsent)", trusted=True)
+            pol = policy_line(L, r"(?i)(create a draft|unsent status draft|prepare an unsent|draft)")
             ev = [appr["id"], scope["id"], snap[0]["id"]] + ([pol["id"]] if pol else [])
             return {"action": "create_draft", "target": {"kind": "draft_queue", "id": f"mailbox:{mailbox}"},
                     "payload": {"recipient": rec, "referenceId": order, "status": snap[2], "template": "order_status"},
@@ -345,7 +357,7 @@ def rule_decide(d):
     fu, mf = first(L, r"(?i)follow-up about (ORD-[A-Z0-9]+)", trusted=False)
     if case_l and fu:
         reason = {"duplicate": "DUPLICATE", "already completed": "ALREADY_COMPLETED", "informational": "INFORMATIONAL"}[mc.group(2)]
-        pol, _ = first(L, r"(?i)(do not create a second side effect|suppress repeat operations)", trusted=True)
+        pol = policy_line(L, r"(?i)(second side effect|suppress|repeat operation|duplicate|informational)")
         ev = [case_l["id"], fu["id"]] + ([pol["id"]] if pol else [])
         return {"action": "no_action", "target": None,
                 "payload": {"reasonCode": reason, "referenceId": mc.group(1)}, "evidence": sorted(set(ev))}
