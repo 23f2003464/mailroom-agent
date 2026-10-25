@@ -274,7 +274,7 @@ def rule_decide(d):
     if ev_l:
         sig, _ = first(L, r"(?i)signature was verified", trusted=True)
         pol = policy_line(L, r"(?i)(carrier (event|change)|signature establishes|case-field mutation|record field|mutat|field change)")
-        ev = [ev_l["id"]] + [x["id"] for x in (sig, pol) if x]
+        ev = [x["id"] for x in (sig, pol) if x] or [ev_l["id"]]
         return {"action": "update_internal_record", "target": {"kind": "case_record", "id": m.group(2)},
                 "payload": {"field": "delivery_window", "sourceEventId": m.group(1), "value": m.group(3)},
                 "evidence": sorted(set(ev))}
@@ -293,8 +293,9 @@ def rule_decide(d):
                     "payload": {"claimedSender": sender, "questionCode": "VERIFY_REQUEST", "referenceId": ref},
                     "evidence": sorted(set(ev))}
     # 4) status notice / draft
-    appr, ma = first(L, r"Approval (EVT-[A-Z0-9]+) .*?(ORD-[A-Z0-9]+) to (" + EMAIL + r") using template approved_delivery_notice", trusted=True)
-    scope, ms = first(L, r"(?:valid for the public status|applies only to the customer-visible state)\s+[\u201c\"]([^\u201d\"]+)[\u201d\"]", trusted=True)
+    appr, ma = first(L, r"Approval (EVT-[A-Z0-9]+).*?(ORD-[A-Z0-9]+).*?\bto\s+(" + EMAIL + r")\s+using template approved_delivery_notice", trusted=True)
+    # the approval's scope line: a trusted approval-source line that quotes the exact status it covers
+    scope, ms = first(L, r"[\u201c\"]([^\u201d\"]+)[\u201d\"]", trusted=True, kinds={"approval"})
     snaps = []
     for l in L:
         if l["prov"] not in TRUSTED: continue
@@ -358,7 +359,7 @@ def rule_decide(d):
     if case_l and fu:
         reason = {"duplicate": "DUPLICATE", "already completed": "ALREADY_COMPLETED", "informational": "INFORMATIONAL"}[mc.group(2)]
         pol = policy_line(L, r"(?i)(second side effect|suppress|repeat operation|duplicate|informational)")
-        ev = [case_l["id"], fu["id"]] + ([pol["id"]] if pol else [])
+        ev = [pol["id"]] if pol else [case_l["id"], fu["id"]]
         return {"action": "no_action", "target": None,
                 "payload": {"reasonCode": reason, "referenceId": mc.group(1)}, "evidence": sorted(set(ev))}
     return None
