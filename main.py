@@ -262,7 +262,7 @@ def rule_decide(d):
     if ev_l:
         sig, _ = first(L, r"(?i)signature was verified", trusted=True)
         pol, _ = first(L, r"(?i)(verified carrier event may update only|signature establishes authority for the single)", trusted=True)
-        ev = [ev_l["id"]] + [x["id"] for x in (sig, pol) if x]
+        ev = [ev_l["id"]] + [x["id"] for x in (sig,) if x]
         return {"action": "update_internal_record", "target": {"kind": "case_record", "id": m.group(2)},
                 "payload": {"field": "delivery_window", "sourceEventId": m.group(1), "value": m.group(3)},
                 "evidence": sorted(set(ev))}
@@ -275,9 +275,7 @@ def rule_decide(d):
         msg2, m2 = first(L, r"(?i)supplies order (ORD-[A-Z0-9]+)", trusted=False)
         pol, _ = first(L, r"(?i)(sender identity conflicts|verified contact and claimed correspondent differ)", trusted=True)
         if msg1:
-            ref = m2.group(1) if m2 else None
-            if ref is None:
-                return None
+            ref = m.group(1)                      # the CASE id from the identity line
             ev = [x["id"] for x in (idl, msg1, msg2, pol) if x]
             return {"action": "request_confirmation", "target": {"kind": "approval_queue", "id": team},
                     "payload": {"claimedSender": sender, "questionCode": "VERIFY_REQUEST", "referenceId": ref},
@@ -342,7 +340,7 @@ def rule_decide(d):
         pol, _ = first(L, r"(?i)(do not create a second side effect|suppress repeat operations)", trusted=True)
         ev = [case_l["id"], fu["id"]] + ([pol["id"]] if pol else [])
         return {"action": "no_action", "target": None,
-                "payload": {"reasonCode": reason, "referenceId": mf.group(1)}, "evidence": sorted(set(ev))}
+                "payload": {"reasonCode": reason, "referenceId": mc.group(1)}, "evidence": sorted(set(ev))}
     return None
 
 def valid_rule(d, prop):
