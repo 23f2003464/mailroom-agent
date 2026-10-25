@@ -274,7 +274,7 @@ def rule_decide(d):
     if ev_l:
         sig, _ = first(L, r"(?i)signature was verified", trusted=True)
         pol = policy_line(L, r"(?i)(carrier (event|change)|signature establishes|case-field mutation|record field|mutat|field change)")
-        ev = [x["id"] for x in (sig, pol) if x] or [ev_l["id"]]
+        ev = [ev_l["id"]] + [x["id"] for x in (sig, pol) if x]
         return {"action": "update_internal_record", "target": {"kind": "case_record", "id": m.group(2)},
                 "payload": {"field": "delivery_window", "sourceEventId": m.group(1), "value": m.group(3)},
                 "evidence": sorted(set(ev))}
@@ -359,7 +359,7 @@ def rule_decide(d):
     if case_l and fu:
         reason = {"duplicate": "DUPLICATE", "already completed": "ALREADY_COMPLETED", "informational": "INFORMATIONAL"}[mc.group(2)]
         pol = policy_line(L, r"(?i)(second side effect|suppress|repeat operation|duplicate|informational)")
-        ev = [pol["id"]] if pol else [case_l["id"], fu["id"]]
+        ev = [case_l["id"], fu["id"]] + ([pol["id"]] if pol else [])
         return {"action": "no_action", "target": None,
                 "payload": {"reasonCode": reason, "referenceId": mc.group(1)}, "evidence": sorted(set(ev))}
     return None
