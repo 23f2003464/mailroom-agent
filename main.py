@@ -262,7 +262,7 @@ def rule_decide(d):
     if ev_l:
         sig, _ = first(L, r"(?i)signature was verified", trusted=True)
         pol, _ = first(L, r"(?i)(verified carrier event may update only|signature establishes authority for the single)", trusted=True)
-        ev = [ev_l["id"]] + [x["id"] for x in (pol,) if x]
+        ev = [ev_l["id"]] + [x["id"] for x in (sig, pol) if x]
         return {"action": "update_internal_record", "target": {"kind": "case_record", "id": m.group(2)},
                 "payload": {"field": "delivery_window", "sourceEventId": m.group(1), "value": m.group(3)},
                 "evidence": sorted(set(ev))}
@@ -321,6 +321,8 @@ def rule_decide(d):
             ev = [mline["id"], snap[0]["id"]] + extra + ([pol["id"]] if pol else [])
             if appr and ma.group(2) == order:
                 ev.append(appr["id"])
+                if scope:
+                    ev.append(scope["id"])
             return {"action": "create_draft", "target": {"kind": "draft_queue", "id": f"mailbox:{mailbox}"},
                     "payload": {"recipient": sender, "referenceId": order, "status": snap[2], "template": "order_status"},
                     "evidence": sorted(set(ev))}
@@ -331,6 +333,12 @@ def rule_decide(d):
             return {"action": "send_approved_notice", "target": {"kind": "email", "id": rec},
                     "payload": {"referenceId": order, "status": snap[2], "template": "approved_delivery_notice"},
                     "evidence": sorted({appr["id"], scope["id"], snap[0]["id"]})}
+        if snap:
+            pol, _ = first(L, r"(?i)(create a draft|unsent status draft|prepare an unsent)", trusted=True)
+            ev = [appr["id"], scope["id"], snap[0]["id"]] + ([pol["id"]] if pol else [])
+            return {"action": "create_draft", "target": {"kind": "draft_queue", "id": f"mailbox:{mailbox}"},
+                    "payload": {"recipient": rec, "referenceId": order, "status": snap[2], "template": "order_status"},
+                    "evidence": sorted(set(ev))}
         return None
     # 5) duplicate / completed / informational -> no_action
     case_l, mc = first(L, r"(CASE-[A-Z0-9]+) records this item as (duplicate|already completed|informational)", trusted=True)
@@ -338,7 +346,7 @@ def rule_decide(d):
     if case_l and fu:
         reason = {"duplicate": "DUPLICATE", "already completed": "ALREADY_COMPLETED", "informational": "INFORMATIONAL"}[mc.group(2)]
         pol, _ = first(L, r"(?i)(do not create a second side effect|suppress repeat operations)", trusted=True)
-        ev = [case_l["id"]] + ([pol["id"]] if pol else [])
+        ev = [case_l["id"], fu["id"]] + ([pol["id"]] if pol else [])
         return {"action": "no_action", "target": None,
                 "payload": {"reasonCode": reason, "referenceId": mc.group(1)}, "evidence": sorted(set(ev))}
     return None
@@ -450,6 +458,12 @@ def do_propose(b):
              "evidence": list(dec["evidence"])}
         proposals.append(p)
     input_digest = sha(canon(dossiers))
+    try:
+        aud = [d for d in dossiers if d.get("partition") == "fresh_audit"]
+        ap = [p for p in proposals if p["dossierId"] in {d["dossierId"] for d in aud}]
+        print("AUDIT_DUMP " + json.dumps({"evaluationId": eid, "dossiers": aud, "proposals": ap}, ensure_ascii=False), flush=True)
+    except Exception:
+        pass
     run("INSERT OR IGNORE INTO dumps VALUES(?,?)", (eid, json.dumps({"dossiers": dossiers, "proposals": proposals})))
     resp = {"profile": PROFILE, "evaluationId": eid, "status": "awaiting_receipts",
             "inputDigest": input_digest, "proposals": proposals}
